@@ -7,7 +7,9 @@ import com.springboot.curso.entity.ExamenEntity;
 import com.springboot.curso.excepcion.DBException;
 import com.springboot.curso.generic.GenericController;
 import com.springboot.curso.service.CursoService;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.cloud.client.circuitbreaker.CircuitBreakerFactory;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
@@ -17,33 +19,36 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
 import javax.validation.Valid;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
+import java.util.*;
 import java.util.stream.Collectors;
 
 @RestController
 public class CursoController extends GenericController<CursoEntity, CursoService> {
+
+    @Autowired
+    private CircuitBreakerFactory circuitBreakerFactory;
 
     @Value("${config.balanceador.test}")
     private String balanceadorTest;
 
     @GetMapping(value = "/listar")
     public ResponseEntity<?> findAll(){
-        try {
-            List<CursoEntity> cursos=  service.findAll().stream().map(c->{
-                c.getCursoAlumnos().forEach(ca->{
-                    AlumnoEntity alumno = new AlumnoEntity();
-                    alumno.setId(ca.getAlumnoId());
-                    c.addAlumno(alumno);
-                });
-                return  c;
-            }).collect(Collectors.toList());
-            return new ResponseEntity<>(cursos, HttpStatus.OK);
-        }catch (DBException e){
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, e.getMessage());
-        }
+        return  circuitBreakerFactory.create("cursos")
+                .run(()-> {
+                    try {
+                        List<CursoEntity> cursos=  service.findAll().stream().map(c->{
+                            c.getCursoAlumnos().forEach(ca->{
+                                AlumnoEntity alumno = new AlumnoEntity();
+                                alumno.setId(ca.getAlumnoId());
+                                c.addAlumno(alumno);
+                            });
+                            return  c;
+                        }).collect(Collectors.toList());
+                        return new ResponseEntity<>(cursos, HttpStatus.OK);
+                    }catch (DBException e){
+                        throw new ResponseStatusException(HttpStatus.NOT_FOUND, e.getMessage());
+                    }
+                }, e->  new ResponseEntity<>(metodoAlternativo(), HttpStatus.OK));
     }
 
     @GetMapping(value = "/{id}")
@@ -219,6 +224,15 @@ public class CursoController extends GenericController<CursoEntity, CursoService
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, e.getMessage());
         }
 
+    }
+
+
+    public List<CursoEntity> metodoAlternativo(){
+        CursoEntity curso = new CursoEntity();
+        curso.setNombre("Este curso es del metodo alternativo");
+        List<CursoEntity> list = new ArrayList<>();
+        list.add(curso);
+        return  list;
     }
 
 
